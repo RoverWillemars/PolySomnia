@@ -35,6 +35,7 @@ class HomePage extends StatelessWidget {
       ),
       body: const Center(
         child: Text('Home Page'),
+        // Show user stats, recent activity, quick access to features, etc.
       ),
     );
   }
