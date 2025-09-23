@@ -3,6 +3,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:scidart/scidart.dart'; // for FFT
+import 'package:scidart/numdart.dart'; // for FFT
 
 class SignalSimulationPage extends StatefulWidget {
   const SignalSimulationPage({super.key});
@@ -30,7 +32,7 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
   Future<void> _selectFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['csv', 'txt'], //csv file is best currently. downloaded from https://physionet.org/content/auditory-eeg/1.0.0/Filtered_Data/#files-panel
+      allowedExtensions: ['csv', 'txt'],
     );
 
     if (result != null && result.files.single.path != null) {
@@ -38,15 +40,19 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
       final file = File(path);
       final lines = await file.readAsLines();
       final data = lines.map((line) {
-        return line.split(',').map((e) => double.tryParse(e) ?? 0.0).toList();
-      }).toList();
+        // parse CSV lines into List<List<double>>, if its 0, it means it couldnt parse
+        return line.split(',').map((e) => double.tryParse(e) ?? 0.0).toList(); 
+      }).toList(); 
 
-      _fileStream = FileStream(data: data, chunkDuration: const Duration(milliseconds: 50));
+      _fileStream = FileStream(data: data, chunkDuration: const Duration(milliseconds: 50)); //20Hz streaming; 
+      // real eeg would be 256Hz or 512Hz, but for simulation, 20Hz is fine
+      // 256Hz = 3900microseconds, 512Hz = 1950microseconds
+      // for the test data, the real sampling rate was 200Hz
       _channelData = [];
       _channelNames = [];
       _subscription?.cancel();
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar( // notification of file load
         SnackBar(content: Text('Loaded file: ${result.files.single.name}')),
       );
     }
@@ -92,16 +98,15 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
     super.dispose();
   }
 
-  // channel 1 doesnt work, maybe cause of the csv header?
   Widget _buildChannelChart(int channelIndex) {
-    final data = _channelData[channelIndex];
+    final data = _channelData[channelIndex]; //this is the signal data being assigned to 'data'
     return SizedBox(
       height: 120,
       child: LineChart(
         LineChartData(
           lineBarsData: [
             LineChartBarData(
-              spots: List.generate(data.length, (i) => FlSpot(i.toDouble(), data[i])),
+              spots: List.generate(data.length, (i) => FlSpot(i.toDouble(), data[i])), //'data' plotted in a linechart
               isCurved: false,
               color: Colors.blue,
               dotData: FlDotData(show: false),
@@ -118,12 +123,58 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
     );
   }
 
+  void _showFFTSpectrum(BuildContext context) {
+    final List<double> spectrum = _fileStream.computeFFT(channel: 3, windowSize: 128);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('FFT Magnitude Spectrum'),
+          content: SizedBox(
+            height: 200,
+            width: 350,
+            child: LineChart(
+              LineChartData(
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: List.generate(
+                      spectrum.length,
+                      (i) => FlSpot(i.toDouble(), spectrum[i]),
+                    ),
+                    isCurved: false,
+                    color: Colors.deepPurple,
+                    dotData: FlDotData(show: false),
+                    barWidth: 2,
+                  ),
+                ],
+                titlesData: FlTitlesData(show: false),
+                gridData: FlGridData(show: true),
+                borderData: FlBorderData(show: true),
+                minY: 0,
+                maxY: spectrum.isNotEmpty
+                    ? spectrum.reduce((a, b) => a > b ? a : b) * 1.1
+                    : 1,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Signal Simulation'), centerTitle: true),
       body: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.all(0.0),
         child: Column(
           children: [
             ElevatedButton(onPressed: _selectFile, child: const Text('Select EEG File')),
@@ -131,18 +182,25 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
             ElevatedButton(onPressed: _startStreaming, child: const Text('Start Streaming')),
             const SizedBox(height: 6),
             ElevatedButton(onPressed: _stopStreaming, child: const Text('Stop Streaming')),
+            const SizedBox(height: 6),
+            ElevatedButton(
+              onPressed: () => _showFFTSpectrum(context),
+              child: const Text('Show FFT Spectrum'),
+            ),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.builder(
                 itemCount: _channelData.length,
                 itemBuilder: (context, index) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_channelNames[index], style: const TextStyle(fontWeight: FontWeight.bold)),
-                      _buildChannelChart(index),
-                      const SizedBox(height: 12),
-                    ],
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        //Text(_channelNames[index], style: const TextStyle(fontWeight: FontWeight.bold)),
+                        _buildChannelChart(index),
+                      ],
+                    ),
                   );
                 },
               ),
@@ -156,6 +214,8 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
 
 // ---------------------------------------------------
 // FileStream class that generates a broadcast stream
+// This is where the functionality of eeg_tools package is mimicked
+// keep adding features to this class, then integrate into the eeg_tools package
 // ---------------------------------------------------
 class FileStream {
   final List<List<double>> data;
@@ -166,7 +226,7 @@ class FileStream {
   Timer? _timer;
   int _index = 0;
 
-  FileStream({required this.data, this.chunkDuration = const Duration(milliseconds: 50)});
+  FileStream({required this.data, this.chunkDuration = const Duration(milliseconds: 50)}); //50ms = 20Hz 
 
   void start() {
     if (_timer != null && _timer!.isActive) return;
@@ -176,7 +236,7 @@ class FileStream {
         _timer?.cancel();
         return;
       }
-      _controller.add([data[_index]]);
+      _controller.add([data[_index]]); // send one sample at a time
       _index++;
     });
   }
@@ -189,4 +249,25 @@ class FileStream {
     _timer?.cancel();
     _controller.close();
   }
+
+  /// Computes the FFT of a given channel's data up to the current index.
+  /// Returns the magnitude spectrum.
+  List<double> computeFFT({int channel = 0, int windowSize = 128}) {
+    final int start = (_index - windowSize).clamp(0, data.length - 1);
+    final List<double> window = [
+      for (int i = start; i < _index; i++) data[i][channel]
+    ];
+    if (window.length < windowSize) {
+      window.insertAll(0, List.filled(windowSize - window.length, 0.0));
+    }
+    final Array real = Array(window);
+    final ArrayComplex input = ArrayComplex([
+      for (var v in real) Complex(real: v, imaginary: 0.0)
+    ]);
+    final ArrayComplex fftResult = fft(input);
+    return arrayComplexAbs(fftResult).toList();
+  }
 }
+
+
+
