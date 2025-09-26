@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:scidart/scidart.dart'; // for FFT
 import 'package:scidart/numdart.dart'; // for FFT
+import 'package:iirjdart/butterworth.dart'; // for Butterworth filter
 
 class SignalSimulationPage extends StatefulWidget {
   const SignalSimulationPage({super.key});
@@ -23,6 +24,11 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
   bool _isStreaming = false;
   bool _showSpectrum = false;
   List<List<double>> _spectrumData = [];
+
+  String _filterType = 'None'; // 'None', 'Low Pass', 'High Pass', 'Band Pass'
+  double _lowCut = 1.0;
+  double _highCut = 40.0;
+  List<List<double>> _filteredData = [];
 
   @override
   void initState() {
@@ -47,14 +53,11 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
       }).toList(); 
 
       _fileStream = FileStream(data: data, chunkDuration: const Duration(milliseconds: 50)); //20Hz streaming; 
-      // real eeg would be 256Hz or 512Hz, but for simulation, 20Hz is fine
-      // 256Hz = 3900microseconds, 512Hz = 1950microseconds
-      // for the test data, the real sampling rate was 200Hz
       _channelData = [];
       _channelNames = [];
       _subscription?.cancel();
 
-      ScaffoldMessenger.of(context).showSnackBar( // notification of file load
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Loaded file: ${result.files.single.name}')),
       );
     }
@@ -77,6 +80,7 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
                     _channelData[ch].length - _maxPoints);
               }
             }
+            _applyFilter();
 
             // Recompute spectrum if in spectrum mode
             if (_showSpectrum) {
@@ -111,7 +115,7 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
   Widget _buildChannelChart(int channelIndex) {
     final data = _showSpectrum
         ? (_spectrumData.isNotEmpty ? _spectrumData[channelIndex] : [])
-        : _channelData[channelIndex];
+        : (_filteredData.isNotEmpty ? _filteredData[channelIndex] : []);
     final minY = data.isNotEmpty ? data.cast<double>().reduce((a, b) => a < b ? a : b) - 5 : 0;
     final maxY = data.isNotEmpty ? data.cast<double>().reduce((a, b) => a > b ? a : b) + 5 : 10;
     return SizedBox(
@@ -137,6 +141,42 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
     );
   }
 
+  // Butterworth filter
+  void _applyFilter() {
+    if (_filterType == 'None') {
+      _filteredData = List.from(_channelData);
+      return;
+    }
+    final fs = 20.0; // Sampling rate (Hz), adjust if needed
+
+    _filteredData = List.generate(_channelData.length, (ch) {
+      final signal = _channelData[ch];
+      List<double> filtered = [];
+      if (_filterType == 'Low Pass') {
+        final butter = Butterworth();
+        butter.lowPass(4, fs, _lowCut);
+        for (var v in signal) {
+          filtered.add(butter.filter(v));
+        }
+      } else if (_filterType == 'High Pass') {
+        final butter = Butterworth();
+        butter.highPass(4, fs, _highCut);
+        for (var v in signal) {
+          filtered.add(butter.filter(v));
+        }
+      } else if (_filterType == 'Band Pass') {
+        final butter = Butterworth();
+        butter.bandPass(4, fs, _lowCut, _highCut);
+        for (var v in signal) {
+          filtered.add(butter.filter(v));
+        }
+      } else {
+        filtered = List.from(signal);
+      }
+      return filtered;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -155,7 +195,6 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
               onPressed: () {
                 setState(() {
                   if (!_showSpectrum) {
-                    // Compute FFT for each channel and store in _spectrumData
                     _spectrumData = List.generate(
                       _channelData.length,
                       (ch) => _fileStream.computeFFT(channel: ch, windowSize: 128),
@@ -169,6 +208,59 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
               child: Text(_showSpectrum ? 'Show Signal' : 'Show FFT Spectrum'),
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('Filter:'),
+                const SizedBox(width: 8),
+                DropdownButton<String>(
+                  value: _filterType,
+                  items: ['None', 'Low Pass', 'High Pass', 'Band Pass']
+                      .map((type) => DropdownMenuItem(value: type, child: Text(type)))
+                      .toList(),
+                  onChanged: (val) {
+                    setState(() {
+                      _filterType = val!;
+                      _applyFilter();
+                    });
+                  },
+                ),
+                if (_filterType == 'Low Pass' || _filterType == 'Band Pass') ...[
+                  const SizedBox(width: 8),
+                  const Text('Low:'),
+                  SizedBox(
+                    width: 60,
+                    child: TextField(
+                      controller: TextEditingController(text: _lowCut.toStringAsFixed(1)),
+                      keyboardType: TextInputType.number,
+                      onSubmitted: (val) {
+                        setState(() {
+                          _lowCut = double.tryParse(val) ?? _lowCut;
+                          _applyFilter();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+                if (_filterType == 'High Pass' || _filterType == 'Band Pass') ...[
+                  const SizedBox(width: 8),
+                  const Text('High:'),
+                  SizedBox(
+                    width: 60,
+                    child: TextField(
+                      controller: TextEditingController(text: _highCut.toStringAsFixed(1)),
+                      keyboardType: TextInputType.number,
+                      onSubmitted: (val) {
+                        setState(() {
+                          _highCut = double.tryParse(val) ?? _highCut;
+                          _applyFilter();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
             Expanded(
               child: ListView.builder(
                 itemCount: _channelData.length,
@@ -178,7 +270,6 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        //Text(_channelNames[index], style: const TextStyle(fontWeight: FontWeight.bold)),
                         _buildChannelChart(index),
                       ],
                     ),
@@ -195,8 +286,6 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
 
 // ---------------------------------------------------
 // FileStream class that generates a broadcast stream
-// This is where the functionality of eeg_tools package is mimicked
-// keep adding features to this class, then integrate into the eeg_tools package
 // ---------------------------------------------------
 class FileStream {
   final List<List<double>> data;
@@ -207,7 +296,7 @@ class FileStream {
   Timer? _timer;
   int _index = 0;
 
-  FileStream({required this.data, this.chunkDuration = const Duration(milliseconds: 50)}); //50ms = 20Hz 
+  FileStream({required this.data, this.chunkDuration = const Duration(milliseconds: 50)});
 
   void start() {
     if (_timer != null && _timer!.isActive) return;
@@ -217,7 +306,7 @@ class FileStream {
         _timer?.cancel();
         return;
       }
-      _controller.add([data[_index]]); // send one sample at a time
+      _controller.add([data[_index]]);
       _index++;
     });
   }

@@ -18,6 +18,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   file_picker: ^10.3.3
   scidart: ^0.0.2-dev.12
+  iirjdart: ^0.1.0
 
 dev_dependencies:
   flutter_test:
