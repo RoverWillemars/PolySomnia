@@ -21,6 +21,8 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
   List<List<double>> _channelData = []; // buffer for all channels
   List<String> _channelNames = [];
   bool _isStreaming = false;
+  bool _showSpectrum = false;
+  List<List<double>> _spectrumData = [];
 
   @override
   void initState() {
@@ -75,6 +77,14 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
                     _channelData[ch].length - _maxPoints);
               }
             }
+
+            // Recompute spectrum if in spectrum mode
+            if (_showSpectrum) {
+              _spectrumData = List.generate(
+                _channelData.length,
+                (ch) => _fileStream.computeFFT(channel: ch, windowSize: 128),
+              );
+            }
           });
         }
       });
@@ -99,16 +109,20 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
   }
 
   Widget _buildChannelChart(int channelIndex) {
-    final data = _channelData[channelIndex]; //this is the signal data being assigned to 'data'
+    final data = _showSpectrum
+        ? (_spectrumData.isNotEmpty ? _spectrumData[channelIndex] : [])
+        : _channelData[channelIndex];
+    final minY = data.isNotEmpty ? data.cast<double>().reduce((a, b) => a < b ? a : b) - 5 : 0;
+    final maxY = data.isNotEmpty ? data.cast<double>().reduce((a, b) => a > b ? a : b) + 5 : 10;
     return SizedBox(
       height: 120,
       child: LineChart(
         LineChartData(
           lineBarsData: [
             LineChartBarData(
-              spots: List.generate(data.length, (i) => FlSpot(i.toDouble(), data[i])), //'data' plotted in a linechart
+              spots: List.generate(data.length, (i) => FlSpot(i.toDouble(), data[i] as double)),
               isCurved: false,
-              color: Colors.blue,
+              color: _showSpectrum ? Colors.deepPurple : Colors.blue,
               dotData: FlDotData(show: false),
               barWidth: 2,
             ),
@@ -116,56 +130,10 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
           titlesData: FlTitlesData(show: false),
           gridData: FlGridData(show: true),
           borderData: FlBorderData(show: true),
-          minY: data.isNotEmpty ? data.reduce((a, b) => a < b ? a : b) - 5 : 0,
-          maxY: data.isNotEmpty ? data.reduce((a, b) => a > b ? a : b) + 5 : 10,
+          minY: minY.toDouble(),
+          maxY: maxY.toDouble(),
         ),
       ),
-    );
-  }
-
-  void _showFFTSpectrum(BuildContext context) {
-    final List<double> spectrum = _fileStream.computeFFT(channel: 3, windowSize: 128);
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('FFT Magnitude Spectrum'),
-          content: SizedBox(
-            height: 200,
-            width: 350,
-            child: LineChart(
-              LineChartData(
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: List.generate(
-                      spectrum.length,
-                      (i) => FlSpot(i.toDouble(), spectrum[i]),
-                    ),
-                    isCurved: false,
-                    color: Colors.deepPurple,
-                    dotData: FlDotData(show: false),
-                    barWidth: 2,
-                  ),
-                ],
-                titlesData: FlTitlesData(show: false),
-                gridData: FlGridData(show: true),
-                borderData: FlBorderData(show: true),
-                minY: 0,
-                maxY: spectrum.isNotEmpty
-                    ? spectrum.reduce((a, b) => a > b ? a : b) * 1.1
-                    : 1,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -184,8 +152,21 @@ class _SignalSimulationPageState extends State<SignalSimulationPage> {
             ElevatedButton(onPressed: _stopStreaming, child: const Text('Stop Streaming')),
             const SizedBox(height: 6),
             ElevatedButton(
-              onPressed: () => _showFFTSpectrum(context),
-              child: const Text('Show FFT Spectrum'),
+              onPressed: () {
+                setState(() {
+                  if (!_showSpectrum) {
+                    // Compute FFT for each channel and store in _spectrumData
+                    _spectrumData = List.generate(
+                      _channelData.length,
+                      (ch) => _fileStream.computeFFT(channel: ch, windowSize: 128),
+                    );
+                    _showSpectrum = true;
+                  } else {
+                    _showSpectrum = false;
+                  }
+                });
+              },
+              child: Text(_showSpectrum ? 'Show Signal' : 'Show FFT Spectrum'),
             ),
             const SizedBox(height: 12),
             Expanded(
