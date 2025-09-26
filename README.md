@@ -12,14 +12,9 @@ Contrary to the plethora of sleep monitoring apps out there, Polysomnia allows u
 
 While it starts with an optimal wake-up feature, Polysomnia is designed to grow into a **citizen neuroscience platform** for affordable, large-scale sleep monitoring and research.
 
-## Why the Name “Polysomnia”
-
-The name combines:  
-- **Poly** – “many” or “multiple,” referring to the multiple aspects of sleep that are being recorded (EEG, EOG, EMG)
-- **Somnia** – Latin for “sleep”  
-
 ## Current Features (v0.0.1)
 - Basic UI scaffold; ready to implement features
+- FFT
 
 ## Key Features (Planned)
 
