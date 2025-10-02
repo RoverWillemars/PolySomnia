@@ -15,6 +15,7 @@ While it starts with an optimal wake-up feature, Polysomnia is designed to grow 
 ## Current Features (v0.0.1)
 - Basic UI scaffold; ready to implement features
 - FFT
+- Threshold sleep stagign based on normalized frequency band power
 
 ## Key Features (Planned)
 
